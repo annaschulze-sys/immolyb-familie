@@ -7,16 +7,17 @@
 
 const app = document.getElementById('app');
 const PASSWORD_KEY = 'immolyb-family-password';
+const FILTER_KEY = 'immolyb-family-filters';
 
 const state = {
   data: null,
   key: null,
   tab: 'list',
-  query: '',
-  profile: '',
-  progress: '',
-  maxPrice: '',
-  sort: 'newest',
+  filter: emptyFilter(),
+  filtersOpen: false,
+  // Profile preselected in the app; remembered filters only apply while it
+  // stays the same.
+  preset: null,
   detail: null,
 };
 
@@ -139,6 +140,7 @@ async function unlock(wrapper, password) {
     const plain = await decrypt(key, bytes(wrapper.data));
     state.data = JSON.parse(new TextDecoder().decode(plain));
     state.key = key;
+    initFilter();
     document.getElementById('stand').textContent = 'Stand: ' + date(state.data.createdAt);
     render();
     return true;
@@ -185,32 +187,123 @@ function login(wrapper, error) {
 
 // ---------- list ----------
 
+// Within a group one chosen value is enough (e.g. profile A or B); all
+// groups must match.
+function emptyFilter() {
+  return {
+    query: '', profiles: [], progresses: [], tags: [],
+    priceMin: '', priceMax: '', areaMin: '', roomsMin: '', plotMin: '',
+    ratingMin: 0, sort: 'newest',
+  };
+}
+
+const SORTS = [['newest', 'Neueste zuerst'], ['priceUp', 'Preis aufsteigend'],
+  ['priceDown', 'Preis absteigend'], ['area', 'Größte Wohnfläche'], ['rating', 'Beste Bewertung']];
+
+/** Remembered filters of this device, or the start view with the preselected profile. */
+function initFilter() {
+  const wanted = state.data.preselectedProfile;
+  state.preset = state.data.profiles.some((p) => p.id === wanted) ? wanted : null;
+  let stored = null;
+  try { stored = JSON.parse(localStorage.getItem(FILTER_KEY) || 'null'); } catch (_) { /* none */ }
+  state.filter = stored && typeof stored === 'object' && stored.preset === state.preset
+    ? sanitizeFilter(stored.filter)
+    : { ...emptyFilter(), profiles: state.preset ? [state.preset] : [] };
+}
+
+/** Keeps only known keys with the expected types. */
+function sanitizeFilter(value) {
+  const filter = emptyFilter();
+  if (!value || typeof value !== 'object') return filter;
+  for (const key of Object.keys(filter)) {
+    const v = value[key];
+    if (Array.isArray(filter[key])) {
+      filter[key] = Array.isArray(v) ? v.filter((x) => typeof x === 'string') : [];
+    } else if (typeof v === typeof filter[key]) {
+      filter[key] = v;
+    }
+  }
+  if (!SORTS.some(([key]) => key === filter.sort)) filter.sort = 'newest';
+  return filter;
+}
+
+function saveFilter() {
+  try {
+    localStorage.setItem(FILTER_KEY, JSON.stringify({ preset: state.preset, filter: state.filter }));
+  } catch (_) { /* private mode */ }
+}
+
+/** Positive number from an input, else null. */
+function amount(value) {
+  if (value === '' || value === null || value === undefined) return null;
+  const n = Number(String(value).replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function atLeast(value, min) {
+  return min === null || (typeof value === 'number' && value >= min);
+}
+
+const searchTexts = new WeakMap();
+
+/** Everything the search looks at, in lower case. */
+function searchText(p) {
+  let text = searchTexts.get(p);
+  if (text === undefined) {
+    text = [
+      p.title, p.offerType, p.city, p.district, p.street, p.postalCode, p.provider,
+      p.progress, p.condition, p.heating, p.renovationNeeds,
+      ...(p.tags || []), ...(p.features || []), ...p.profiles.map((a) => a.name),
+      ...(p.notes || []).map((n) => n.text),
+      ...(p.texts || []).map((t) => `${t.title || ''} ${t.text || ''}`),
+      ...(p.checklist || []).map((c) => `${c.label} ${c.note || ''}`),
+    ].filter(Boolean).join('\n').toLowerCase();
+    searchTexts.set(p, text);
+  }
+  return text;
+}
+
+/** Best rating among the chosen profiles (or all). */
+function rating(p, f) {
+  const relevant = f.profiles.length ? p.profiles.filter((a) => f.profiles.includes(a.id)) : p.profiles;
+  return Math.max(0, ...relevant.map((a) => a.rating || 0));
+}
+
+function matches(p, f) {
+  const words = f.query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length && !words.every((w) => searchText(p).includes(w))) return false;
+  if (f.profiles.length && !f.profiles.some((id) =>
+    id === '-' ? !p.profiles.length : p.profiles.some((a) => a.id === id))) return false;
+  if (f.progresses.length) {
+    if (!f.progresses.includes(p.progress || '-')) return false;
+  } else if (p.progress === 'Abgelehnt') {
+    return false;
+  }
+  if (f.tags.length && !f.tags.some((t) => (p.tags || []).includes(t))) return false;
+  const priceMin = amount(f.priceMin);
+  const priceMax = amount(f.priceMax);
+  if (priceMin !== null || priceMax !== null) {
+    if (typeof p.price !== 'number') return false;
+    if (priceMin !== null && p.price < priceMin) return false;
+    if (priceMax !== null && p.price > priceMax) return false;
+  }
+  if (!atLeast(p.livingArea, amount(f.areaMin))) return false;
+  if (!atLeast(p.rooms, amount(f.roomsMin))) return false;
+  if (!atLeast(p.plotArea, amount(f.plotMin))) return false;
+  if (f.ratingMin > 0 && rating(p, f) < f.ratingMin) return false;
+  return true;
+}
+
 function filtered() {
-  const q = state.query.trim().toLowerCase();
-  const max = Number(state.maxPrice);
-  const list = state.data.properties.filter((p) => {
-    if (q && ![p.title, p.city, p.district, p.street, p.postalCode, p.provider]
-      .some((v) => v && String(v).toLowerCase().includes(q))) return false;
-    if (state.profile === '-') { if (p.profiles.length) return false; }
-    else if (state.profile && !p.profiles.some((a) => a.id === state.profile)) return false;
-    if (state.progress === '-') { if (p.progress) return false; }
-    else if (state.progress && p.progress !== state.progress) return false;
-    else if (!state.progress && p.progress === 'Abgelehnt') return false;
-    if (max > 0 && !(typeof p.price === 'number' && p.price <= max)) return false;
-    return true;
-  });
+  const f = state.filter;
   const by = {
     newest: (a, b) => String(b.addedAt || '').localeCompare(String(a.addedAt || '')),
     priceUp: (a, b) => (a.price ?? Infinity) - (b.price ?? Infinity),
     priceDown: (a, b) => (b.price ?? -Infinity) - (a.price ?? -Infinity),
     area: (a, b) => (b.livingArea ?? 0) - (a.livingArea ?? 0),
-    rating: (a, b) => best(b) - best(a),
-  }[state.sort];
-  return list.sort(by);
-}
-
-function best(p) {
-  return Math.max(0, ...p.profiles.map((a) => a.rating || 0));
+    rating: (a, b) => rating(b, f) - rating(a, f),
+  }[f.sort];
+  return state.data.properties.filter((p) => matches(p, f)).sort(by);
 }
 
 function select(value, options, onchange, label) {
@@ -228,41 +321,129 @@ function render() {
   app.replaceChildren(tabs, state.tab === 'profiles' ? renderProfiles() : renderList());
 }
 
+// Parts of the list view that change with the filters.
+let listView = null;
+
 function renderList() {
-  const data = state.data;
-  const progresses = [...new Set(data.properties.map((p) => p.progress).filter(Boolean))];
   const search = el('input', {
-    type: 'search', placeholder: 'Suchen (Titel, Ort, Straße …)', value: state.query,
-    'aria-label': 'Suchen',
-    oninput: (e) => { state.query = e.target.value; update(); },
+    type: 'search', placeholder: 'Suchen (Ort, Straße, Notizen, Ausstattung …)',
+    value: state.filter.query, 'aria-label': 'Suchen',
+    oninput: (e) => { state.filter.query = e.target.value; changed(false); },
   });
-  const grid = el('div', { class: 'grid' });
-  const count = el('span', { class: 'muted small' });
-  function update() {
-    const list = filtered();
-    const rejected = data.properties.filter((p) => p.progress === 'Abgelehnt').length;
-    count.textContent = `${list.length} von ${data.properties.length} Immobilien`
-      + (!state.progress && rejected ? ` · ${rejected} abgelehnte ausgeblendet (Filter „Stand“)` : '');
-    grid.replaceChildren(...list.map(card));
-  }
-  const filters = el('div', { class: 'filters' },
-    search,
-    select(state.profile, [['', 'Alle Suchprofile'], ...data.profiles.map((p) => [p.id, p.name]), ['-', 'Nicht zugeordnet']],
-      (v) => { state.profile = v; update(); }, 'Suchprofil'),
-    select(state.progress, [['', 'Jeder Stand'], ...progresses.map((p) => [p, p]), ['-', 'Ohne Stand']],
-      (v) => { state.progress = v; update(); }, 'Stand'),
-    el('input', {
-      type: 'number', inputmode: 'numeric', min: '0', step: '10000', placeholder: 'Preis bis €',
-      value: state.maxPrice, 'aria-label': 'Preis bis',
-      oninput: (e) => { state.maxPrice = e.target.value; update(); },
-    }),
-    select(state.sort, [['newest', 'Neueste zuerst'], ['priceUp', 'Preis aufsteigend'],
-      ['priceDown', 'Preis absteigend'], ['area', 'Größte Wohnfläche'], ['rating', 'Beste Bewertung']],
-      (v) => { state.sort = v; update(); }, 'Sortierung'),
-    count,
+  const toggle = el('button', {
+    class: 'filter-toggle',
+    onclick: () => { state.filtersOpen = !state.filtersOpen; refresh(true); },
+  });
+  const sort = select(state.filter.sort, SORTS, (v) => { state.filter.sort = v; changed(false); }, 'Sortierung');
+  listView = {
+    toggle,
+    active: el('div', { class: 'active-filters' }),
+    panel: el('div', { class: 'filter-panel' }),
+    count: el('div', { class: 'muted small count' }),
+    grid: el('div', { class: 'grid' }),
+  };
+  refresh(true);
+  const { active, panel, count, grid } = listView;
+  return el('div', {}, el('div', { class: 'filters' }, search, toggle, sort), active, panel, count, grid);
+}
+
+/** After a filter change: remember it and show the result. */
+function changed(rebuildPanel) {
+  saveFilter();
+  refresh(rebuildPanel);
+}
+
+function refresh(rebuildPanel) {
+  const { toggle, active, panel, count, grid } = listView;
+  const chips = activeFilters(state.filter);
+  toggle.textContent = chips.length ? `Filter (${chips.length})` : 'Filter';
+  toggle.setAttribute('aria-expanded', String(state.filtersOpen));
+  active.replaceChildren(
+    ...chips.map(([label, remove]) => el('button', {
+      class: 'chip removable', 'aria-label': `Filter „${label}“ entfernen`, onclick: remove,
+    }, label, ' ✕')),
+    chips.length ? el('button', {
+      class: 'link',
+      onclick: () => {
+        state.filter = { ...emptyFilter(), query: state.filter.query, sort: state.filter.sort };
+        changed(true);
+      },
+    }, 'Alle Filter entfernen') : null,
   );
-  update();
-  return el('div', {}, filters, grid);
+  if (rebuildPanel) panel.replaceChildren(...(state.filtersOpen ? filterPanel() : []));
+  panel.hidden = !state.filtersOpen;
+  const list = filtered();
+  const all = state.data.properties;
+  const rejected = all.filter((p) => p.progress === 'Abgelehnt').length;
+  count.textContent = `${list.length} von ${all.length} Immobilien`
+    + (!state.filter.progresses.length && rejected
+      ? ` · ${rejected} abgelehnte ausgeblendet (Filter „Stand“)` : '');
+  grid.replaceChildren(...list.map(card));
+}
+
+/** Chosen filters as [label, remove] for the row above the list. */
+function activeFilters(f) {
+  const profileName = (id) => id === '-'
+    ? 'Nicht zugeordnet'
+    : (state.data.profiles.find((p) => p.id === id) || { name: 'Suchprofil' }).name;
+  const drop = (key, value) => () => {
+    state.filter[key] = state.filter[key].filter((v) => v !== value);
+    changed(true);
+  };
+  const clear = (key) => () => { state.filter[key] = key === 'ratingMin' ? 0 : ''; changed(true); };
+  const list = [
+    ...f.profiles.map((id) => [profileName(id), drop('profiles', id)]),
+    ...f.progresses.map((v) => [v === '-' ? 'Ohne Stand' : v, drop('progresses', v)]),
+    ...f.tags.map((t) => [t, drop('tags', t)]),
+  ];
+  const n = (key) => amount(f[key]);
+  if (n('priceMin') !== null) list.push([`ab ${euro.format(n('priceMin'))}`, clear('priceMin')]);
+  if (n('priceMax') !== null) list.push([`bis ${euro.format(n('priceMax'))}`, clear('priceMax')]);
+  if (n('areaMin') !== null) list.push([`ab ${number.format(n('areaMin'))} m²`, clear('areaMin')]);
+  if (n('roomsMin') !== null) list.push([`ab ${number.format(n('roomsMin'))} Zi.`, clear('roomsMin')]);
+  if (n('plotMin') !== null) list.push([`ab ${number.format(n('plotMin'))} m² Grund`, clear('plotMin')]);
+  if (f.ratingMin > 0) list.push([`ab ${stars(f.ratingMin)}`, clear('ratingMin')]);
+  return list;
+}
+
+/** Filter groups: chips to tap (several possible) and number fields. */
+function filterPanel() {
+  const data = state.data;
+  const toggleValue = (key, value) => () => {
+    const list = state.filter[key];
+    state.filter[key] = list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+    changed(true);
+  };
+  const group = (title, ...content) => el('fieldset', { class: 'group' }, el('legend', {}, title), content);
+  const chipGroup = (title, key, options) => options.length ? group(title,
+    el('div', { class: 'chips' }, options.map(([value, label]) => el('button', {
+      class: 'chip toggle', 'aria-pressed': String(state.filter[key].includes(value)),
+      onclick: toggleValue(key, value),
+    }, label)))) : null;
+  const field = (label, key, step) => el('label', { class: 'field' }, label, el('input', {
+    type: 'number', inputmode: 'decimal', min: '0', step, value: state.filter[key],
+    oninput: (e) => { state.filter[key] = e.target.value; changed(false); },
+  }));
+  const progresses = [...new Set(data.properties.map((p) => p.progress).filter(Boolean))];
+  const tagCounts = new Map();
+  for (const p of data.properties) for (const t of p.tags || []) tagCounts.set(t, (tagCounts.get(t) || 0) + 1);
+  const tags = [...tagCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'de')).map(([t]) => t);
+  return [
+    chipGroup('Suchprofil', 'profiles', [...data.profiles.map((p) => [p.id, p.name]), ['-', 'Nicht zugeordnet']]),
+    chipGroup('Stand', 'progresses', [['-', 'Ohne Stand'], ...progresses.map((p) => [p, p])]),
+    group('Eckdaten', el('div', { class: 'fields' },
+      field('Preis ab €', 'priceMin', '10000'),
+      field('Preis bis €', 'priceMax', '10000'),
+      field('Wohnfläche ab m²', 'areaMin', '10'),
+      field('Zimmer ab', 'roomsMin', '1'),
+      field('Grundstück ab m²', 'plotMin', '50'))),
+    group('Bewertung', el('div', { class: 'chips' }, [0, 1, 2, 3, 4, 5].map((n) => el('button', {
+      class: 'chip toggle', 'aria-pressed': String(state.filter.ratingMin === n),
+      onclick: () => { state.filter.ratingMin = n; changed(true); },
+    }, n ? `ab ${'★'.repeat(n)}` : 'Alle')))),
+    chipGroup('Tags', 'tags', tags.map((t) => [t, t])),
+    el('p', { class: 'muted small' }, 'Innerhalb einer Gruppe genügt eine Auswahl (z. B. Suchprofil A oder B); alle Gruppen müssen passen.'),
+  ];
 }
 
 function image(src, cls) {
@@ -306,7 +487,7 @@ function renderProfiles() {
   const data = state.data;
   const count = (id) => data.properties.filter((p) => p.profiles.some((a) => a.id === id)).length;
   const none = data.properties.filter((p) => !p.profiles.length).length;
-  const open = (id) => { state.profile = id; state.tab = 'list'; render(); };
+  const open = (id) => { state.filter.profiles = [id]; saveFilter(); state.tab = 'list'; render(); };
   return el('div', { class: 'profiles' },
     data.profiles.map((p) => el('button', { onclick: () => open(p.id) },
       el('b', {}, p.name),
