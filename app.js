@@ -377,7 +377,7 @@ function refresh(rebuildPanel) {
   const rejected = all.filter((p) => p.progress === 'Abgelehnt').length;
   count.textContent = `${list.length} von ${all.length} Immobilien`
     + (!state.filter.progresses.length && rejected
-      ? ` · ${rejected} abgelehnte ausgeblendet (Filter „Stand“)` : '');
+      ? ` · ${rejected} abgelehnte ausgeblendet (Filter „Status“)` : '');
   grid.replaceChildren(...list.map(card));
 }
 
@@ -393,7 +393,7 @@ function activeFilters(f) {
   const clear = (key) => () => { state.filter[key] = key === 'ratingMin' ? 0 : ''; changed(true); };
   const list = [
     ...f.profiles.map((id) => [profileName(id), drop('profiles', id)]),
-    ...f.progresses.map((v) => [v === '-' ? 'Ohne Stand' : v, drop('progresses', v)]),
+    ...f.progresses.map((v) => [v === '-' ? 'Ohne Status' : v, drop('progresses', v)]),
     ...f.tags.map((t) => [t, drop('tags', t)]),
   ];
   const n = (key) => amount(f[key]);
@@ -430,7 +430,7 @@ function filterPanel() {
   const tags = [...tagCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'de')).map(([t]) => t);
   return [
     chipGroup('Suchprofil', 'profiles', [...data.profiles.map((p) => [p.id, p.name]), ['-', 'Nicht zugeordnet']]),
-    chipGroup('Stand', 'progresses', [['-', 'Ohne Stand'], ...progresses.map((p) => [p, p])]),
+    chipGroup('Status', 'progresses', [['-', 'Ohne Status'], ...progresses.map((p) => [p, p])]),
     group('Eckdaten', el('div', { class: 'fields' },
       field('Preis ab €', 'priceMin', '10000'),
       field('Preis bis €', 'priceMax', '10000'),
@@ -485,8 +485,10 @@ function profileLine(a) {
 
 function renderProfiles() {
   const data = state.data;
-  const count = (id) => data.properties.filter((p) => p.profiles.some((a) => a.id === id)).length;
-  const none = data.properties.filter((p) => !p.profiles.length).length;
+  // Rejected ones are hidden in the list, so not counted.
+  const shown = data.properties.filter((p) => p.progress !== 'Abgelehnt');
+  const count = (id) => shown.filter((p) => p.profiles.some((a) => a.id === id)).length;
+  const none = shown.filter((p) => !p.profiles.length).length;
   const open = (id) => { state.filter.profiles = [id]; saveFilter(); state.tab = 'list'; render(); };
   return el('div', { class: 'profiles' },
     data.profiles.map((p) => el('button', { onclick: () => open(p.id) },
@@ -532,6 +534,10 @@ function renderDetail(p) {
     el('div', { class: 'chips' },
       p.progress && el('span', { class: 'chip progress' }, p.progress),
       p.tags.map((t) => el('span', { class: 'chip' }, t))),
+    // The listing on each portal, right at the top.
+    el('div', { class: 'chips' }, p.portals.map((l) => safeUrl(l.url)).filter(Boolean).map((url) =>
+      el('a', { class: 'chip link-chip', href: url, target: '_blank', rel: 'noopener noreferrer' },
+        `${new URL(url).hostname.replace(/^www\./, '')} ↗`))),
     p.images.length ? el('div', { class: 'gallery' }, p.images.map((src) => image(src))) : null,
     section('Eckdaten', el('dl', { class: 'facts' }, facts.map(([k, v]) => el('div', {}, el('dt', {}, k), el('dd', {}, v))))),
     section('Lage', place(p) && el('div', {}, place(p)),
