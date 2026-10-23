@@ -59,7 +59,21 @@ button.primary { background: var(--accent); color: var(--accent-text); border-co
 .tabs button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; align-items: center; }
 .filters input[type="search"] { flex: 1 1 220px; }
-.filters input[type="number"] { width: 150px; }
+.filter-toggle[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+.active-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; align-items: center; }
+.active-filters:empty { display: none; }
+button.chip { min-height: 36px; padding: 4px 12px; border: 1px solid var(--line); font-size: 14px; border-radius: 999px; }
+button.chip.removable { background: var(--chip); }
+button.chip.toggle[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button.link { border: 0; background: none; color: var(--accent); min-height: 36px; padding: 4px 6px; text-decoration: underline; }
+.filter-panel { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 12px 14px; margin-bottom: 12px; display: grid; gap: 14px; }
+.filter-panel[hidden] { display: none; }
+fieldset.group { border: 0; margin: 0; padding: 0; min-width: 0; }
+fieldset.group legend { font-weight: 600; font-size: 14px; margin-bottom: 6px; padding: 0; }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.field { display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
+.field input { width: 100%; }
+.count { margin-bottom: 12px; }
 .grid {
   display: grid; gap: 16px;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
