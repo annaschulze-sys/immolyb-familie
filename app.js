@@ -98,7 +98,10 @@ async function decrypt(key, data) {
 function dataLink() {
   const raw = decodeURIComponent(location.hash.slice(1));
   const url = safeUrl(raw);
-  return url && new URL(url).hostname.endsWith('dropboxusercontent.com') ? url : null;
+  if (!url) return null;
+  // Only Dropbox itself, not e.g. "evil-dropboxusercontent.com".
+  const host = new URL(url).hostname;
+  return host === 'dropboxusercontent.com' || host.endsWith('.dropboxusercontent.com') ? url : null;
 }
 
 function loadSaved() {
