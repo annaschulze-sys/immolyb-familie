@@ -61,6 +61,17 @@ function date(value) {
   return isNaN(d) ? '' : d.toLocaleDateString('de-DE');
 }
 
+const weekdays = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+
+/** "Mo 24.08.2026, 14:00 Uhr". */
+function appointmentDate(a) {
+  const d = new Date(a.at);
+  if (isNaN(d)) return '';
+  const two = (v) => String(v).padStart(2, '0');
+  const day = `${weekdays[d.getDay()]} ${d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}`;
+  return a.hasTime ? `${day}, ${two(d.getHours())}:${two(d.getMinutes())} Uhr` : day;
+}
+
 function stars(rating) {
   if (!rating) return '';
   return '★'.repeat(rating) + '☆'.repeat(5 - rating);
@@ -545,6 +556,8 @@ function renderDetail(p) {
     section('Eckdaten', el('dl', { class: 'facts' }, facts.map(([k, v]) => el('div', {}, el('dt', {}, k), el('dd', {}, v))))),
     section('Lage', place(p) && el('div', {}, place(p)),
       maps && el('a', { href: maps, target: '_blank', rel: 'noopener noreferrer' }, 'In Google Maps öffnen')),
+    section('Termine', (p.appointments || []).map((a) => el('div', { class: 'note' },
+      el('b', {}, appointmentDate(a)), ' · ', a.title))),
     section('Suchprofile', p.profiles.map(profileLine)),
     section('Besichtigungs-Checkliste', (p.checklist || []).map((c) => el('div', { class: 'note' },
       el('div', {}, el('b', {}, c.state || '–'), ' · ', c.label, c.category ? el('span', { class: 'muted small' }, ` (${c.category})`) : ''),
