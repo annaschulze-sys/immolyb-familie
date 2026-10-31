@@ -556,6 +556,13 @@ function renderDetail(p) {
     section('Eckdaten', el('dl', { class: 'facts' }, facts.map(([k, v]) => el('div', {}, el('dt', {}, k), el('dd', {}, v))))),
     section('Lage', place(p) && el('div', {}, place(p)),
       maps && el('a', { href: maps, target: '_blank', rel: 'noopener noreferrer' }, 'In Google Maps öffnen')),
+    p.facts ? section('Fakten aus Unterlagen (KI)',
+      p.facts.summary ? el('div', {}, p.facts.summary) : null,
+      el('dl', { class: 'facts' }, (p.facts.facts || []).map((f) => el('div', {},
+        el('dt', {}, `${f.field} [${f.mark}]`),
+        el('dd', { class: f.mark === 'R' ? 'deviation' : null }, f.value)))),
+      (p.facts.openPoints || []).length
+        ? el('div', { class: 'muted small' }, 'Offen: ' + p.facts.openPoints.join(' · ')) : null) : null,
     section('Termine', (p.appointments || []).map((a) => el('div', { class: 'note' },
       el('b', {}, appointmentDate(a)), ' · ', a.title))),
     section('Suchprofile', p.profiles.map(profileLine)),
