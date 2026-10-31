@@ -572,7 +572,8 @@ function renderDetail(p) {
     section('Notizen', p.notes.map((n) => el('div', { class: 'note' },
       el('div', { class: 'pre' }, n.text), el('div', { class: 'muted small' }, date(n.createdAt))))),
     p.renovationNeeds ? section('Sanierungsbedarf', el('div', { class: 'pre' }, p.renovationNeeds)) : null,
-    section('Dokumente', el('div', { class: 'docs' }, (p.documents || []).map(documentButton))),
+    (p.documents || []).some((d) => d.floorPlan) ? section('Grundrisse', el('div', { class: 'docs' }, p.documents.filter((d) => d.floorPlan).map(documentButton))) : null,
+    section('Dokumente', el('div', { class: 'docs' }, (p.documents || []).filter((d) => !d.floorPlan).map(documentButton))),
     mailsSection(p.mails),
     section('Beschreibung', p.texts.map((t) => el('details', {},
       el('summary', {}, t.title || 'Text'), el('div', { class: 'pre' }, t.text)))),
@@ -613,9 +614,14 @@ function documentButton(d) {
         const response = await fetch(url, { referrerPolicy: 'no-referrer' });
         if (!response.ok) throw new Error(response.status);
         const plain = await decrypt(state.key, new Uint8Array(await response.arrayBuffer()));
-        const isPdf = d.name.toLowerCase().endsWith('.pdf');
-        const blob = new Blob([plain], { type: isPdf ? 'application/pdf' : 'application/octet-stream' });
-        const link = el('a', { href: URL.createObjectURL(blob), download: isPdf ? null : d.name, target: '_blank', rel: 'noopener' });
+        const lower = d.name.toLowerCase();
+        const type = lower.endsWith('.pdf') ? 'application/pdf'
+          : /\.jpe?g$/.test(lower) ? 'image/jpeg'
+          : lower.endsWith('.png') ? 'image/png'
+          : 'application/octet-stream';
+        const shown = type !== 'application/octet-stream';
+        const blob = new Blob([plain], { type });
+        const link = el('a', { href: URL.createObjectURL(blob), download: shown ? null : d.name, target: '_blank', rel: 'noopener' });
         document.body.append(link);
         link.click();
         link.remove();
@@ -626,7 +632,7 @@ function documentButton(d) {
         button.disabled = false;
       }
     },
-  }, 'Öffnen: ' + d.name + sizeText);
+  }, 'Öffnen: ' + (d.floorPlan && d.label ? 'Grundriss ' + d.label : d.name) + sizeText);
   return button;
 }
 
