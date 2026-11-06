@@ -205,11 +205,14 @@ function login(wrapper, error) {
 // groups must match.
 function emptyFilter() {
   return {
-    query: '', profiles: [], progresses: [], tags: [],
+    query: '', profiles: [], progresses: [], triages: [], tags: [],
     priceMin: '', priceMax: '', areaMin: '', roomsMin: '', plotMin: '',
     ratingMin: 0, sort: 'newest',
   };
 }
+
+/** Triage labels of the app, in their order. */
+const TRIAGES = ['Interessant', 'Potential', 'Später'];
 
 const SORTS = [['newest', 'Neueste zuerst'], ['priceUp', 'Preis aufsteigend'],
   ['priceDown', 'Preis absteigend'], ['area', 'Größte Wohnfläche'], ['rating', 'Beste Bewertung']];
@@ -266,7 +269,7 @@ function searchText(p) {
   if (text === undefined) {
     text = [
       p.title, p.offerType, p.city, p.district, p.street, p.postalCode, p.provider,
-      p.progress, p.condition, p.heating, p.renovationNeeds,
+      p.progress, p.triage, p.condition, p.heating, p.renovationNeeds,
       ...(p.tags || []), ...(p.features || []), ...p.profiles.map((a) => a.name),
       ...(p.notes || []).map((n) => n.text),
       ...(p.texts || []).map((t) => `${t.title || ''} ${t.text || ''}`),
@@ -293,6 +296,7 @@ function matches(p, f) {
   } else if (p.progress === 'Abgelehnt') {
     return false;
   }
+  if (f.triages.length && !f.triages.includes(p.triage || '-')) return false;
   if (f.tags.length && !f.tags.some((t) => (p.tags || []).includes(t))) return false;
   const priceMin = amount(f.priceMin);
   const priceMax = amount(f.priceMax);
@@ -408,6 +412,7 @@ function activeFilters(f) {
   const list = [
     ...f.profiles.map((id) => [profileName(id), drop('profiles', id)]),
     ...f.progresses.map((v) => [v === '-' ? 'Ohne Status' : v, drop('progresses', v)]),
+    ...f.triages.map((v) => [v === '-' ? 'Nicht gesichtet' : v, drop('triages', v)]),
     ...f.tags.map((t) => [t, drop('tags', t)]),
   ];
   const n = (key) => amount(f[key]);
@@ -445,6 +450,7 @@ function filterPanel() {
   return [
     chipGroup('Suchprofil', 'profiles', [...data.profiles.map((p) => [p.id, p.name]), ['-', 'Nicht zugeordnet']]),
     chipGroup('Status', 'progresses', [['-', 'Ohne Status'], ...progresses.map((p) => [p, p])]),
+    chipGroup('Sichtung', 'triages', [...TRIAGES.map((t) => [t, t]), ['-', 'Nicht gesichtet']]),
     group('Eckdaten', el('div', { class: 'fields' },
       field('Preis ab €', 'priceMin', '10000'),
       field('Preis bis €', 'priceMax', '10000'),
@@ -480,7 +486,9 @@ function card(p) {
       el('div', { class: 'price' }, price(p.price)),
       facts && el('div', { class: 'small' }, facts),
       el('div', { class: 'muted small' }, place(p)),
-      el('div', { class: 'chips' }, p.progress && el('span', { class: 'chip progress' }, p.progress)),
+      el('div', { class: 'chips' },
+        p.triage && el('span', { class: 'chip progress' }, p.triage),
+        p.progress && el('span', { class: 'chip progress' }, p.progress)),
       p.profiles.map(profileLine),
     ),
   );
@@ -546,6 +554,7 @@ function renderDetail(p) {
     el('div', {}, el('button', { class: 'back', onclick: () => history.back() }, '← Zurück')),
     el('h2', {}, p.title),
     el('div', { class: 'chips' },
+      p.triage && el('span', { class: 'chip progress' }, p.triage),
       p.progress && el('span', { class: 'chip progress' }, p.progress),
       p.tags.map((t) => el('span', { class: 'chip' }, t))),
     // The listing on each portal, right at the top.
